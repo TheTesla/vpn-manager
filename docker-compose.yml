@@ -1,0 +1,24 @@
+version: '3.2'
+
+services:
+  vpnserver:
+    build: server
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - WGADR=10.23.42.1/24
+      - WGADRRNG=10.23.42.0/24
+
+  vpnclient:
+    build: client
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - WGADR=10.23.42.2/24
+      - WGADRRNG=10.23.42.0/24
+      - ENDPOINT=vpnserver:51820
+
+
+
