@@ -2,8 +2,6 @@
 
 ip link add dev wg0 type wireguard
 
-ip address add dev wg0 $WGADR
-
 umask 077
 
 wg genkey > privatekey
@@ -19,19 +17,27 @@ cat publickey
 echo "psk ="
 cat psk
 
-wg set wg0 listen-port 51820 private-key privatekey 
-
-sleep 3
+sleep 5
 
 export MYPUBKEY=$(cat publickey)
 
 echo $MYPUBKEY
 
-export SERVPUBKEY=$(curl -X POST vpnserver:5000/api/connectpeer?pubkey=$MYPUBKEY | jq -r .pubkey)
+export APIRV=$(curl -X POST vpnserver:5000/api/connectpeer -H "Content-Type: application/json" -d '{ "pubkey": "'$MYPUBKEY'"}')
+
+export SERVPUBKEY=$(echo $APIRV | jq -r .pubkey)
+export WGADR=$(echo $APIRV | jq -r .ip)
+
 
 echo $SERVPUBKEY
+echo $WGADR
 
-wg set wg0 peer $SERVPUBKEY allowed-ips $WGADRRNG endpoint $ENDPOINT
+ip address add dev wg0 $WGADR
+
+wg set wg0 listen-port 51820 private-key privatekey 
+
+
+wg set wg0 peer $SERVPUBKEY allowed-ips $WGADR endpoint $ENDPOINT
 
 ip link set up dev wg0
 
