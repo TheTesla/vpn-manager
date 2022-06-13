@@ -44,5 +44,8 @@ ip link set up dev wg0
 
 echo "test"
 
-
-sleep 1000
+while true
+do
+curl -X GET vpnserver:5000/api/connectpeer -H "Content-Type: application/json" -d '{ "pubkey": "'$MYPUBKEY'"}'
+sleep 5
+done

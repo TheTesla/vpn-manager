@@ -7,8 +7,8 @@ import time
 from threading import Thread
 
 
-def run(cli):
-    sp.check_output(cli)
+def run(cli, input=None):
+    return sp.check_output(cli, input=input)
 
 def ip2value(ip):
     lbls = ip.split('/')[0].split('.')
@@ -83,6 +83,9 @@ class VPNManager:
         self.__enabled = False
         self.__setupLink()
 
+    def getPubKey(self):
+        return self.__pubkey
+
     def getConfig(self):
         return {'ip' : self.__ip, 'iprng': self.__ipRng, 'port': self.__port,
                 'dev': self.__dev, 'dhcpstart': self.__dhcpStart, 'dhcpend':
@@ -98,10 +101,13 @@ class VPNManager:
         self.__rmLink()
         if self.__enabled == False:
             return
+        self.__privkey = run(['wg', 'genkey']).replace(b'\n',b'')
+        self.__pubkey = run(['wg', 'pubkey'],
+                        input=self.__privkey).replace(b'\n', b'')
         run(['ip', 'link', 'add', 'dev', self.__dev, 'type', 'wireguard'])
         run(['ip', 'address', 'add', 'dev', self.__dev, self.__ip])
         run(['wg', 'set', self.__dev, 'listen-port', str(self.__port), 'private-key',
-        'privatekey'])
+        '/dev/stdin'], input=self.__privkey)
         run(['ip', 'link', 'set', 'up', 'dev', self.__dev])
 
     def __rmLink(self):
@@ -164,24 +170,24 @@ vpn.enable()
 def apiconnect():
     #pubkey = request.args.get('pubkey', '')
     pubkey = request.json['pubkey']
-    try:
-        if request.method == 'DELETE':
-            vpn.deleteClient(pubkey)
-            return json.dumps({'success': True})
-        if request.method == 'POST':
-            client = vpn.addClient(pubkey)
-            with open("publickey", 'r') as f:
-                clientPubKey = f.read()
-            return json.dumps({'success': True, 'pubkey': clientPubKey, 'ip':
-                client['ip'], 'iprng': vpn.getIPRng()})
-        if request.method == 'GET':
-            client = checkClient(pubkey)
-            return json.dumps({'success': True, 'pubkey': clientPubKey, 'ip':
-                client['ip'], 'iprng': vpn.getIPRng()})
+    #try:
+    if request.method == 'DELETE':
+        vpn.deleteClient(pubkey)
+        return json.dumps({'success': True})
+    if request.method == 'POST':
+        client = vpn.addClient(pubkey)
+        serverPubKey = vpn.getPubKey().decode()
+        return json.dumps({'success': True, 'pubkey': serverPubKey, 'ip':
+            client['ip'], 'iprng': vpn.getIPRng()})
+    if request.method == 'GET':
+        client = vpn.checkClient(pubkey)
+        serverPubKey = vpn.getPubKey().decode()
+        return json.dumps({'success': True, 'pubkey': serverPubKey, 'ip':
+            client['ip'], 'iprng': vpn.getIPRng()})
 
-    except Exception as e:
-        assert(e)
-        pass
+    #except Exception as e:
+    #    raise(e)
+    #    pass
 
     return json.dumps({'success': False})
 
@@ -193,6 +199,7 @@ def hello_world():
     page += "<meta http-equiv=\"refresh\" content=\"1\" />"
     page += "</head><body>"
     page += "<table>"
+    page += "<tr><th>PUBKEY</th><td>{}</td>".format(vpn.getPubKey().decode())
     for k, v in vpn.getConfig().items():
         page += "<tr><th>{}</th><td>{}</td></tr>".format(k, v)
     page += "</table>"
@@ -200,7 +207,7 @@ def hello_world():
     page += "<tr><th>Peer public key</th><th>ip</th><th>created age (s)</th><th>renewed age (s)</th></tr>"
     t = time.time()
     for k, v in vpn.getClientDict().items():
-        page += "<tr><td>{}</td><td>{}</td><td align=right>{:9.1f}</td></tr>".format(k, v['ip'], t-v['created'], t-v['renewed'])
+        page += "<tr><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['ip'], t-v['created'], t-v['renewed'])
     page += "</table>"
     page += "</body></html>"
     return page
