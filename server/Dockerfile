@@ -6,7 +6,7 @@ RUN apt-get -y update && apt-get install -y wireguard iproute2 python3 python3-p
 
 RUN apt-get -y update && apt-get install -y iputils-ping curl
 
-RUN pip3 install flask 
+RUN pip3 install flask flask_httpauth 
 
 COPY vpnconfig.py /.
 

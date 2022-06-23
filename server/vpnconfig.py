@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from flask import Flask
 from flask import request
+from flask_httpauth import HTTPTokenAuth
+
 import subprocess as sp
 import json
 import time
@@ -123,18 +125,19 @@ class VPNManager:
             del self.__clientDict[pubkey]
         run(['wg', 'set', self.__dev, 'peer', pubkey, 'remove'])
 
-    def addClient(self, pubkey):
+    def addClient(self, pubkey, user):
         if pubkey not in self.__clientDict:
             self.__clientDict[pubkey] = {}
             self.__clientDict[pubkey]['ip'] = self.__ipSet.pop()
             self.__clientDict[pubkey]['created'] = time.time()
+            self.__clientDict[pubkey]['user'] = user
         self.__clientDict[pubkey]['renewed'] = time.time()
         run(['wg', 'set', self.__dev, 'peer', pubkey, 'allowed-ips',
             self.__ipRng])
         return self.__clientDict[pubkey]
 
 
-    def checkClient(self, pubkey):
+    def checkClient(self, pubkey, user):
         if pubkey not in self.__clientDict:
             return None
         self.__clientDict[pubkey]['renewed'] = time.time()
@@ -160,13 +163,34 @@ class VPNManager:
 
 
 app = Flask(__name__)
+auth = HTTPTokenAuth(scheme='Bearer')
 
 
 vpn = VPNManager()
 vpn.enable()
 
 
+
+tokens = {}
+
+
+@auth.verify_token
+def verify_token(token):
+    global tokens
+    if token not in tokens:
+        tokens[token] = False
+    return tokens[token]
+
+@app.route("/api/permitpeer", methods=['GET'])
+def apipermitpeer():
+    args = request.args
+    if request.method == 'GET':
+        tokens[args['token']] = args['user']
+    return "<html><head></head><body>Peer added</body></html>"
+
+
 @app.route("/api/connectpeer", methods=['POST', 'GET', 'DELETE'])
+@auth.login_required
 def apiconnect():
     #pubkey = request.args.get('pubkey', '')
     pubkey = request.json['pubkey']
@@ -175,12 +199,12 @@ def apiconnect():
         vpn.deleteClient(pubkey)
         return json.dumps({'success': True})
     if request.method == 'POST':
-        client = vpn.addClient(pubkey)
+        client = vpn.addClient(pubkey, auth.current_user())
         serverPubKey = vpn.getPubKey().decode()
         return json.dumps({'success': True, 'pubkey': serverPubKey, 'ip':
             client['ip'], 'iprng': vpn.getIPRng()})
     if request.method == 'GET':
-        client = vpn.checkClient(pubkey)
+        client = vpn.checkClient(pubkey, auth.current_user())
         serverPubKey = vpn.getPubKey().decode()
         return json.dumps({'success': True, 'pubkey': serverPubKey, 'ip':
             client['ip'], 'iprng': vpn.getIPRng()})
@@ -198,16 +222,24 @@ def hello_world():
     page += "<title>VPN Server Dashboard</title>"
     page += "<meta http-equiv=\"refresh\" content=\"1\" />"
     page += "</head><body>"
+
+
+    page += "<table>"
+    page += "<tr><th>token</th><th>machine user</th></tr>"
+    for k, v in tokens.items():
+        page += "<tr><td>{}</td><td>{}</td><td><a href=/api/permitpeer?token={}&user={}>add peer</a></td></tr>".format(k, v, k, k[:6])
+    page += "</table>"
+
     page += "<table>"
     page += "<tr><th>PUBKEY</th><td>{}</td>".format(vpn.getPubKey().decode())
     for k, v in vpn.getConfig().items():
         page += "<tr><th>{}</th><td>{}</td></tr>".format(k, v)
     page += "</table>"
     page += "<table>"
-    page += "<tr><th>Peer public key</th><th>ip</th><th>created age (s)</th><th>renewed age (s)</th></tr>"
+    page += "<tr><th>Peer public key</th><th>machine user</th><th>ip</th><th>created age (s)</th><th>renewed age (s)</th></tr>"
     t = time.time()
     for k, v in vpn.getClientDict().items():
-        page += "<tr><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['ip'], t-v['created'], t-v['renewed'])
+        page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['user'], v['ip'], t-v['created'], t-v['renewed'])
     page += "</table>"
     page += "</body></html>"
     return page
