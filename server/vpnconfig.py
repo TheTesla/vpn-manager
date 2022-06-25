@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from flask import Flask
 from flask import request
-from flask_httpauth import HTTPTokenAuth
+from flask_httpauth import HTTPTokenAuth, HTTPBasicAuth
+from werkzeug.security import generate_password_hash, check_password_hash
+
 
 import subprocess as sp
 import json
@@ -47,6 +49,26 @@ def ipRng2set(ipStart, ipEnd, ipHost):
         raise ValueError('IP range end violates netmask')
     return {value2ip(x)+'/{}'.format(ms) for x in range(s,e) if x != h}
 
+
+class UserManager:
+    def __init__(self):
+        self.users = {'admin': {
+                        'password': generate_password_hash("sicher"),
+                        'roles': ['admin', 'user'] } }
+
+    def verify(self, username, password):
+        if username not in self.users:
+            return False
+        if check_password_hash(self.users[username]['password'], password):
+            return username
+        return False
+
+    def hasRole(self, username, role):
+        if username not in self.users:
+            return False
+        if role in self.users[username]['roles']:
+            return True
+        return False
 
 
 class PeerManager:
@@ -189,6 +211,7 @@ class VPNManager:
 
 app = Flask(__name__)
 auth = HTTPTokenAuth(scheme='Bearer')
+authuser = HTTPBasicAuth()
 
 
 vpn = VPNManager()
@@ -197,13 +220,19 @@ vpn.enable()
 
 pm = PeerManager()
 
+um = UserManager()
 
+
+@authuser.verify_password
+def verify_password(username, password):
+    return um.verify(username, password)
 
 @auth.verify_token
 def verify_token(token):
     return pm.verify(token)
 
 @app.route("/api/permitpeer", methods=['GET', 'POST', 'DELETE'])
+@authuser.login_required
 def apipermitpeer():
     args = request.form
     if '_method' in args:
@@ -218,6 +247,7 @@ def apipermitpeer():
                 <body>Peer disabled</body></html>"
 
 @app.route("/api/managepeer", methods=['GET', 'POST', 'DELETE'])
+@authuser.login_required
 def apimanagepeer():
     args = request.form
     if '_method' in args:
@@ -261,6 +291,7 @@ def apiconnect():
 
 
 @app.route("/")
+@authuser.login_required
 def hello_world():
     page = "<html><head>"
     page += "<title>VPN Server Dashboard</title>"
