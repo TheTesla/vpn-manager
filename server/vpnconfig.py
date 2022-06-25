@@ -9,6 +9,8 @@ import time
 from threading import Thread
 
 
+hostname = 'vpnserver'
+
 def run(cli, input=None):
     return sp.check_output(cli, input=input)
 
@@ -47,6 +49,28 @@ def ipRng2set(ipStart, ipEnd, ipHost):
 
 
 
+class PeerManager:
+    def __init__(self):
+        self.peers = {}
+
+    def verify(self, token):
+        if token not in self.peers:
+            name = 'Peer_{}'.format(token[-8:])
+            self.peers[token] = {'permit': False, 'name': name}
+        if self.peers[token]['permit']:
+            return self.peers[token]['name']
+
+    def permit(self, token, allow=True):
+        if token not in self.peers:
+            name = 'Peer_{}'.format(token[-8:])
+            self.peers[token] = {'permit': False, 'name': name}
+        self.peers[token]['permit'] = allow
+        return True
+
+    def delete(self, token):
+        del self.peers[token]
+
+
 class VPNManager:
     def __init__(self, ip='10.23.42.1/24', port=51820, dev='wg0',
             dhcpStart='10.23.42.2', dhcpEnd='10.23.42.150', timeout=10):
@@ -57,6 +81,7 @@ class VPNManager:
         self.__thrd = Thread(target=self.purgeTimeoutThrdFunc)
         self.__thrd.start()
         self.setConfig(ip, port, dev, dhcpStart, dhcpEnd, timeout)
+        self.hostname = 'vpnserver'
 
     def setConfig(self, ip=None, port=None, dev=None, dhcpStart=None,
             dhcpEnd=None, timeout=None):
@@ -170,23 +195,42 @@ vpn = VPNManager()
 vpn.enable()
 
 
+pm = PeerManager()
 
-tokens = {}
 
 
 @auth.verify_token
 def verify_token(token):
-    global tokens
-    if token not in tokens:
-        tokens[token] = False
-    return tokens[token]
+    return pm.verify(token)
 
-@app.route("/api/permitpeer", methods=['GET'])
+@app.route("/api/permitpeer", methods=['GET', 'POST', 'DELETE'])
 def apipermitpeer():
-    args = request.args
-    if request.method == 'GET':
-        tokens[args['token']] = args['user']
-    return "<html><head></head><body>Peer added</body></html>"
+    args = request.form
+    if '_method' in args:
+        request.method = args['_method']
+    if request.method == 'POST':
+        pm.permit(args['token'])
+        return "<html><head><meta http-equiv=refresh content=\"1; URL=/\"></head>\
+                <body>Peer enabled</body></html>"
+    if request.method == 'DELETE':
+        pm.permit(args['token'], False)
+        return "<html><head><meta http-equiv=refresh content=\"1; URL=/\"></head>\
+                <body>Peer disabled</body></html>"
+
+@app.route("/api/managepeer", methods=['GET', 'POST', 'DELETE'])
+def apimanagepeer():
+    args = request.form
+    if '_method' in args:
+        request.method = args['_method']
+    if request.method == 'POST':
+        pm.permit(args['token'], False)
+        return "<html><head><meta http-equiv=refresh content=\"1; URL=/\"></head>\
+                </head><body>Peer added</body></html>"
+    if request.method == 'DELETE':
+        pm.delete(args['token'])
+        return "<html><head><meta http-equiv=refresh content=\"1; URL=/\"></head>\
+                </head><body>Peer removed</body></html>"
+
 
 
 @app.route("/api/connectpeer", methods=['POST', 'GET', 'DELETE'])
@@ -202,12 +246,12 @@ def apiconnect():
         client = vpn.addClient(pubkey, auth.current_user())
         serverPubKey = vpn.getPubKey().decode()
         return json.dumps({'success': True, 'pubkey': serverPubKey, 'ip':
-            client['ip'], 'iprng': vpn.getIPRng()})
+            client['ip'], 'iprng': vpn.getIPRng(), 'host': vpn.hostname})
     if request.method == 'GET':
         client = vpn.checkClient(pubkey, auth.current_user())
         serverPubKey = vpn.getPubKey().decode()
         return json.dumps({'success': True, 'pubkey': serverPubKey, 'ip':
-            client['ip'], 'iprng': vpn.getIPRng()})
+            client['ip'], 'iprng': vpn.getIPRng(), 'host': vpn.hostname})
 
     #except Exception as e:
     #    raise(e)
@@ -225,9 +269,21 @@ def hello_world():
 
 
     page += "<table>"
-    page += "<tr><th>token</th><th>machine user</th></tr>"
-    for k, v in tokens.items():
-        page += "<tr><td>{}</td><td>{}</td><td><a href=/api/permitpeer?token={}&user={}>add peer</a></td></tr>".format(k, v, k, k[:6])
+    page += "<tr><th>token</th><th>peer</th><th>permitted</th></tr>"
+    for k, v in pm.peers.items():
+        page += "<tr><td>{}</td><td>{}</td><td>{}</td>".format(k, v['name'],
+                v['permit'])
+        page += "<td><form action=/api/permitpeer method=post> \
+                   <input type=hidden id=token name=token value={}> \
+                   <input type=submit value=enablepeer ></form></td>".format(k)
+        page += "<td><form action=/api/permitpeer method=post> \
+                   <input type=hidden name=_method value=DELETE> \
+                   <input type=hidden id=token name=token value={}> \
+                   <input type=submit value=disablepeer ></form></td>".format(k)
+        page += "<td><form action=/api/managepeer method=post> \
+                   <input type=hidden name=_method value=DELETE> \
+                   <input type=hidden id=token name=token value={}> \
+                   <input type=submit value=removepeer ></form></td>".format(k)
     page += "</table>"
 
     page += "<table>"
