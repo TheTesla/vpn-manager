@@ -23,7 +23,14 @@ export MYPUBKEY=$(cat publickey)
 
 echo $MYPUBKEY
 
-export APIRV=$(curl -X POST vpnserver:5000/api/connectpeer -H "Authorization: Bearer mytokenhome" -H "Content-Type: application/json" -d '{ "pubkey": "'$MYPUBKEY'"}')
+while true
+do
+  export APIRV=$(curl -X POST vpnserver:5000/api/connectpeer -H "Authorization: Bearer mytokenhome" -H "Content-Type: application/json" -d '{ "pubkey": "'$MYPUBKEY'"}')
+  if $(echo $APIRV | jq -r .success) eq "True"
+  then
+    break
+  fi
+done
 
 export SERVPUBKEY=$(echo $APIRV | jq -r .pubkey)
 export WGADR=$(echo $APIRV | jq -r .ip)

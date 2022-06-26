@@ -11,7 +11,6 @@ import time
 from threading import Thread
 
 
-hostname = 'vpnserver'
 
 def run(cli, input=None):
     return sp.check_output(cli, input=input)
@@ -93,20 +92,91 @@ class PeerManager:
         del self.peers[token]
 
 
+class DHCPv4:
+    def __init__(self, timeout = 10):
+        self.__IPs = dict()
+        self.__timeout = timeout
+
+
+    def addIPs(self, ip):
+        if type(ip) is set:
+            ip = list(ip)
+        if type(ip) is list:
+            return [self.addIPs(e) for e in ip]
+        if ip in self.__IPs:
+            return False
+        self.__IPs[ip] = 0
+        return True
+
+
+
+
+    def getAllIPs(self):
+        return set(self.__IPs.keys())
+
+    def getAllAvailableIPs(self):
+        now = time.time()
+        return {k for k, v in self.__IPs.items() if v + self.__timeout < now}
+
+    def offer(self):
+        return list(self.getAllAvailableIPs())
+
+    def renew(self, ip):
+        if ip not in self.__IPs:
+            return False
+        if ip not in self.getAllAvailableIPs():
+            self.__IPs[ip] = time.time()
+            return True
+        return False
+
+    def request(self, ip):
+        if ip not in self.__IPs:
+            return False
+        if ip in self.getAllAvailableIPs():
+            self.__IPs[ip] = time.time()
+            return True
+        return False
+
+    def release(self, ip):
+        if ip not in self.__IPs:
+            return False
+        self.__IPs[ip] = 0
+        return True
+
+    def giveIP(self, currentIP=None):
+        if not currentIP:
+            ips = self.offer()
+            if len(ips) == 0:
+                return False
+            ip = ips[0]
+            self.request(ip)
+            return ip
+        if self.renew(currentIP):
+            return currentIP
+        return self.giveIP()
+
+    def getAllUsed(self):
+        now = time.time()
+        return {k: v for k, v in self.__IPs.items() if v + self.__timeout > now}
+
+
+
 class VPNManager:
     def __init__(self, ip='10.23.42.1/24', port=51820, dev='wg0',
-            dhcpStart='10.23.42.2', dhcpEnd='10.23.42.150', timeout=10):
+            timeout=10, dhcpv4=None):
         self.__enabled = False
         self.__clientDict = {}
         self.__timeout = timeout
         self.__alive = True
         self.__thrd = Thread(target=self.purgeTimeoutThrdFunc)
         self.__thrd.start()
-        self.setConfig(ip, port, dev, dhcpStart, dhcpEnd, timeout)
+        self.setConfig(ip, port, dev, timeout)
         self.hostname = 'vpnserver'
+        if dhcpv4 is None:
+            dhcpv4 = DHCPv4()
+        self.dhcpv4 = dhcpv4
 
-    def setConfig(self, ip=None, port=None, dev=None, dhcpStart=None,
-            dhcpEnd=None, timeout=None):
+    def setConfig(self, ip=None, port=None, dev=None, timeout=None):
         if ip is not None:
             self.__ip = ip
             self.__ipRng = calcIpNet(ip)
@@ -114,13 +184,8 @@ class VPNManager:
             self.__port = port
         if dev is not None:
             self.__dev = dev
-        if dhcpStart is not None:
-            self.__dhcpStart = dhcpStart
-        if dhcpEnd is not None:
-            self.__dhcpEnd = dhcpEnd
         if timeout is not None:
             self.__timeout = timeout
-        self.__ipSet = ipRng2set(dhcpStart, dhcpEnd, ip)
         self.__clientDict = {}
         self.__setupLink()
 
@@ -137,8 +202,7 @@ class VPNManager:
 
     def getConfig(self):
         return {'ip' : self.__ip, 'iprng': self.__ipRng, 'port': self.__port,
-                'dev': self.__dev, 'dhcpstart': self.__dhcpStart, 'dhcpend':
-                self.__dhcpEnd, 'timeout': self.__timeout}
+                'dev': self.__dev, 'timeout': self.__timeout}
 
     def getIPRng(self):
         return self.__ipRng
@@ -168,16 +232,19 @@ class VPNManager:
 
     def deleteClient(self, pubkey):
         if pubkey in self.__clientDict:
-            self.__ipSet.add(self.__clientDict[pubkey]['ip'])
+            #self.__ipSet.add(self.__clientDict[pubkey]['ip'])
+            self.dhcpv4.release(self.__clientDict[pubkey]['ip'])
             del self.__clientDict[pubkey]
         run(['wg', 'set', self.__dev, 'peer', pubkey, 'remove'])
 
     def addClient(self, pubkey, user):
         if pubkey not in self.__clientDict:
             self.__clientDict[pubkey] = {}
-            self.__clientDict[pubkey]['ip'] = self.__ipSet.pop()
+            #self.__clientDict[pubkey]['ip'] = self.__ipSet.pop()
+            self.__clientDict[pubkey]['ip'] = self.dhcpv4.giveIP()
             self.__clientDict[pubkey]['created'] = time.time()
             self.__clientDict[pubkey]['user'] = user
+        self.__clientDict[pubkey]['ip'] = self.dhcpv4.giveIP(self.__clientDict[pubkey]['ip'])
         self.__clientDict[pubkey]['renewed'] = time.time()
         run(['wg', 'set', self.__dev, 'peer', pubkey, 'allowed-ips',
             self.__ipRng])
@@ -187,6 +254,7 @@ class VPNManager:
     def checkClient(self, pubkey, user):
         if pubkey not in self.__clientDict:
             return None
+        self.__clientDict[pubkey]['ip'] = self.dhcpv4.giveIP(self.__clientDict[pubkey]['ip'])
         self.__clientDict[pubkey]['renewed'] = time.time()
         return self.__clientDict[pubkey]
 
@@ -214,7 +282,10 @@ auth = HTTPTokenAuth(scheme='Bearer')
 authuser = HTTPBasicAuth()
 
 
-vpn = VPNManager()
+dhcpv4 = DHCPv4()
+dhcpv4.addIPs(ipRng2set('10.23.42.2','10.23.42.150','10.23.42.1/24'))
+
+vpn = VPNManager(dhcpv4=dhcpv4)
 vpn.enable()
 
 
@@ -266,9 +337,7 @@ def apimanagepeer():
 @app.route("/api/connectpeer", methods=['POST', 'GET', 'DELETE'])
 @auth.login_required
 def apiconnect():
-    #pubkey = request.args.get('pubkey', '')
     pubkey = request.json['pubkey']
-    #try:
     if request.method == 'DELETE':
         vpn.deleteClient(pubkey)
         return json.dumps({'success': True})
@@ -282,11 +351,6 @@ def apiconnect():
         serverPubKey = vpn.getPubKey().decode()
         return json.dumps({'success': True, 'pubkey': serverPubKey, 'ip':
             client['ip'], 'iprng': vpn.getIPRng(), 'host': vpn.hostname})
-
-    #except Exception as e:
-    #    raise(e)
-    #    pass
-
     return json.dumps({'success': False})
 
 
@@ -322,11 +386,21 @@ def hello_world():
     for k, v in vpn.getConfig().items():
         page += "<tr><th>{}</th><td>{}</td></tr>".format(k, v)
     page += "</table>"
+    page += "DHCP v4"
+    page += "<table>"
+    page += "<tr><th>ip</th><th>age</th></tr>"
+
+    for k, v in dhcpv4.getAllUsed().items():
+        now = time.time()
+        page += "<tr><td>{}</td><td>{}</td></tr>".format(k, now-v)
+    page += "</table>"
     page += "<table>"
     page += "<tr><th>Peer public key</th><th>machine user</th><th>ip</th><th>created age (s)</th><th>renewed age (s)</th></tr>"
+    #page += "<tr><th>Peer public key</th><th>ip</th><th>created age (s)</th><th>renewed age (s)</th></tr>"
     t = time.time()
     for k, v in vpn.getClientDict().items():
         page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['user'], v['ip'], t-v['created'], t-v['renewed'])
+        #page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['ip'], t-v['created'], t-v['renewed'])
     page += "</table>"
     page += "</body></html>"
     return page
