@@ -25,8 +25,9 @@ echo $MYPUBKEY
 
 while true
 do
+  sleep 1 
   export APIRV=$(curl -X POST vpnserver:5000/api/connectpeer -H "Authorization: Bearer mytokenhome" -H "Content-Type: application/json" -d '{ "pubkey": "'$MYPUBKEY'"}')
-  if $(echo $APIRV | jq -r .success) eq "True"
+  if [[ $(echo $APIRV | jq -r .success) == "true" ]]
   then
     break
   fi

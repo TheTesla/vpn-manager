@@ -97,7 +97,6 @@ class DHCPv4:
         self.__IPs = dict()
         self.__timeout = timeout
 
-
     def addIPs(self, ip):
         if type(ip) is set:
             ip = list(ip)
@@ -107,9 +106,6 @@ class DHCPv4:
             return False
         self.__IPs[ip] = 0
         return True
-
-
-
 
     def getAllIPs(self):
         return set(self.__IPs.keys())
@@ -273,6 +269,12 @@ class VPNManager:
     def __del__(self):
         self.disable()
         self.__alive = False
+
+#iptables -A FORWARD -i eth0 -o wg0 -p tcp --syn --dport 80 -m conntrack --ctstate NEW -j ACCEPT
+#iptables -A FORWARD -i eth0 -o wg0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+#iptables -A FORWARD -i wg0 -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+#iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j DNAT --to-destination 10.23.42.32
+#iptables -t nat -A POSTROUTING -o wg0 -p tcp --dport 80 -d 10.23.42.32 -j SNAT --to-source 10.23.42.1
 
 
 
