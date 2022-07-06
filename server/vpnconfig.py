@@ -270,6 +270,13 @@ class VPNManager:
         self.disable()
         self.__alive = False
 
+
+class NAPTmanager:
+    def __init__(self):
+        self.__ext = "eth0"
+        self.__int = "wg0"
+
+
 #iptables -A FORWARD -i eth0 -o wg0 -p tcp --syn --dport 80 -m conntrack --ctstate NEW -j ACCEPT
 #iptables -A FORWARD -i eth0 -o wg0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 #iptables -A FORWARD -i wg0 -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT

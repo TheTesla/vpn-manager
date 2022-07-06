@@ -2,11 +2,11 @@ FROM ubuntu:20.04
 
 ENV DEBIAN_FRONTEND noninteractive 
 
-RUN apt-get -y update && apt-get install -y wireguard iproute2 python3 python3-pip
+RUN apt-get -y update && apt-get install -y wireguard iproute2 iptables python3 python3-pip
 
 RUN apt-get -y update && apt-get install -y iputils-ping curl
 
-RUN pip3 install flask flask_httpauth 
+RUN pip3 install flask flask_httpauth python-iptables
 
 COPY vpnconfig.py /.
 
