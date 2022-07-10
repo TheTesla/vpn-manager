@@ -10,6 +10,7 @@ import json
 import time
 from threading import Thread
 
+import iptc
 
 
 def run(cli, input=None):
@@ -272,9 +273,69 @@ class VPNManager:
 
 
 class NAPTmanager:
-    def __init__(self):
-        self.__ext = "eth0"
-        self.__int = "wg0"
+    def __init__(self, manXif=['eth0'], manIif=['wg0'], dxif='eth0', diif='wg0', dsip='10.23.42.1'):
+        self.__manXif = manXif
+        self.__manIif = manIif
+        self.__map = [] #[{'xport': 80, 'iport': 80, 'iip': '10.23.42.32'}]
+        self.setDefaults(dxif, diif, dsip)
+
+    def setDefaults(self, dxif=None, diif=None, dsip=None):
+        if dxif is not None:
+            self.__dxif = dxif
+        if diif is not None:
+            self.__diif = diif
+        if dsip is not None:
+            self.__dsip = dsip
+        self.commit()
+
+    def getMap(self):
+        return self.__map
+
+    def setMap(self, mapping):
+        self.__map = mapping
+        self.commit()
+
+    def setManagedXif(manXif):
+        self.__manXif = manXif
+        self.commit()
+
+    def setManagedIif(manIif):
+        self.__manIif = manIif
+        self.commit()
+
+    def commit(self):
+        postr = iptc.easy.dump_chain('nat', 'POSTROUTING', ipv6=False)
+        postd = [e for e in postr if 'out-interface' in e if e['out-interface'] in self.__manIif]
+        for e in postd:
+            iptc.easy.delete_rule('nat', 'POSTROUTING', e)
+        prer = iptc.easy.dump_chain('nat', 'PREROUTING', ipv6=False)
+        pred = [e for e in prer if 'in-interface' in e if e['in-interface'] in self.__manXif]
+        for e in pred:
+            iptc.easy.delete_rule('nat', 'PREROUTING', e)
+
+        for e in self.__map:
+            xiface = e['xiface'] if 'xiface' in e else self.__dxif
+            iiface = e['iiface'] if 'iiface' in e else self.__diif
+            sip = e['sip'] if 'sip' in e else self.__dsip
+            pre = { 'protocol': 'tcp', \
+                    'in-interface': xiface, \
+                    'tcp': {'dport': f"{e['xport']}"}, \
+                    'target': {'DNAT': {'to-destination': e['iip']} } }
+            post = {'dst': e['iip'],
+                    'protocol': 'tcp',
+                    'out-interface': iiface,
+                    'tcp': {'dport': f"{e['iport']}"},
+                    'target': {'SNAT': {'to-source': sip} } }
+            iptc.easy.insert_rule('nat', 'PREROUTING', pre)
+            iptc.easy.insert_rule('nat', 'POSTROUTING', post)
+
+
+
+
+
+
+
+
 
 
 #iptables -A FORWARD -i eth0 -o wg0 -p tcp --syn --dport 80 -m conntrack --ctstate NEW -j ACCEPT
@@ -301,6 +362,15 @@ vpn.enable()
 pm = PeerManager()
 
 um = UserManager()
+
+
+vpnconf = vpn.getConfig()
+
+#naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip=vpnconf['ip'],
+#                    diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
+
+naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip='10.23.42.1',
+                    diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
 
 
 @authuser.verify_password
@@ -395,9 +465,19 @@ def hello_world():
     for k, v in vpn.getConfig().items():
         page += "<tr><th>{}</th><td>{}</td></tr>".format(k, v)
     page += "</table>"
+
+    page += "<h2>NAPT Table</h2>"
+    page += "<table>"
+    page += "<tr><th>public port</th><th>internal port</th><th>internal ip</th></tr>"
+    for e in naptm.getMap():
+        page += f"<tr><td>{e['xport']}</td><td>{e['iport']}</td><td>{e['iip']}</td></tr>"
+    page += "</table>"
+
     page += "DHCP v4"
     page += "<table>"
     page += "<tr><th>ip</th><th>age</th></tr>"
+
+
 
     for k, v in dhcpv4.getAllUsed().items():
         now = time.time()
@@ -408,6 +488,7 @@ def hello_world():
     #page += "<tr><th>Peer public key</th><th>ip</th><th>created age (s)</th><th>renewed age (s)</th></tr>"
     t = time.time()
     for k, v in vpn.getClientDict().items():
+        naptm.setMap([{'xport': 80, 'iport': 80, 'iip': v['ip'].split('/')[0]}])
         page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['user'], v['ip'], t-v['created'], t-v['renewed'])
         #page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['ip'], t-v['created'], t-v['renewed'])
     page += "</table>"
