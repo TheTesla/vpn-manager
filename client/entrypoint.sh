@@ -45,7 +45,7 @@ ip address add dev wg0 $WGADR
 wg set wg0 listen-port 51820 private-key privatekey 
 
 
-wg set wg0 peer $SERVPUBKEY allowed-ips $WGADR endpoint $ENDPOINT
+wg set wg0 peer $SERVPUBKEY allowed-ips $WGADR endpoint $ENDPOINT persistent-keepalive 18
 
 ip link set up dev wg0
 

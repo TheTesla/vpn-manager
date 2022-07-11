@@ -366,11 +366,11 @@ um = UserManager()
 
 vpnconf = vpn.getConfig()
 
-#naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip=vpnconf['ip'],
-#                    diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
-
-naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip='10.23.42.1',
+naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip=vpnconf['ip'].split('/')[0],
                     diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
+
+#naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip='10.23.42.1',
+#                    diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
 
 
 @authuser.verify_password
