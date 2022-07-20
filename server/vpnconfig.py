@@ -272,6 +272,71 @@ class VPNManager:
         self.__alive = False
 
 
+class NAPTmanConn:
+    def __init__(self):
+        self.__cnf = [] #[{'xport': 80, 'iport': 80, 'iip': '10.23.42.32',
+            #'conn': myVPN}]
+        self.__manXif = set({})
+        self.__manIif = set({})
+
+
+    def setConf(self, cnf):
+        self.__cnf = cnf
+        self.commit()
+
+    def getConf(self):
+        return self.__cnf
+
+    def commit(self):
+        mapping = [ {'xport': e['xport'],
+                     'iport': e['iport'],
+                     'iip': e['iip'],
+                     'sip': e['conn'].getConfig()['ip'].split('/')[0],
+                     'iiface': e['conn'].getConfig()['dev'],
+                     'xiface': e['xiface'] } for e in self.__cnf ]
+
+        manXif = {e['xiface'] for e in mapping}
+        manIif = {e['iiface'] for e in mapping}
+        self.__manXif.update(manXif)
+        self.__manIif.update(manIif)
+
+        postr = iptc.easy.dump_chain('nat', 'POSTROUTING', ipv6=False)
+        postd = [e for e in postr if 'out-interface' in e if e['out-interface'] in self.__manIif]
+        for e in postd:
+            iptc.easy.delete_rule('nat', 'POSTROUTING', e)
+        prer = iptc.easy.dump_chain('nat', 'PREROUTING', ipv6=False)
+        pred = [e for e in prer if 'in-interface' in e if e['in-interface'] in self.__manXif]
+        for e in pred:
+            iptc.easy.delete_rule('nat', 'PREROUTING', e)
+        self.__manXif = manXif
+        self.__manIif = manIif
+
+        for e in mapping:
+            pre = { 'protocol': 'tcp', \
+                    'in-interface': e['xiface'], \
+                    'tcp': {'dport': f"{e['xport']}"}, \
+                    'target': {'DNAT': {'to-destination': e['iip']} } }
+            post = {'dst': e['iip'],
+                    'protocol': 'tcp',
+                    'out-interface': e['iiface'],
+                    'tcp': {'dport': f"{e['iport']}"},
+                    'target': {'SNAT': {'to-source': e['sip']} } }
+            iptc.easy.insert_rule('nat', 'PREROUTING', pre)
+            iptc.easy.insert_rule('nat', 'POSTROUTING', post)
+
+
+    def __del__(self):
+        self.setConf([])
+
+
+
+
+
+
+
+
+
+
 class NAPTmanager:
     def __init__(self, manXif=['eth0'], manIif=['wg0'], dxif='eth0', diif='wg0', dsip='10.23.42.1'):
         self.__manXif = manXif
@@ -329,6 +394,8 @@ class NAPTmanager:
             iptc.easy.insert_rule('nat', 'PREROUTING', pre)
             iptc.easy.insert_rule('nat', 'POSTROUTING', post)
 
+    def __del__(self):
+        self.setMap([])
 
 
 
@@ -366,11 +433,12 @@ um = UserManager()
 
 vpnconf = vpn.getConfig()
 
-naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip=vpnconf['ip'].split('/')[0],
-                    diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
+#naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip=vpnconf['ip'].split('/')[0],
+#                    diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
 
 #naptm = NAPTmanager(manIif=[vpnconf['dev']], dsip='10.23.42.1',
 #                    diif=vpnconf['dev'], manXif=['eth0'], dxif='eth0')
+naptMC = NAPTmanConn()
 
 
 @authuser.verify_password
@@ -468,9 +536,13 @@ def hello_world():
 
     page += "<h2>NAPT Table</h2>"
     page += "<table>"
-    page += "<tr><th>public port</th><th>internal port</th><th>internal ip</th></tr>"
-    for e in naptm.getMap():
-        page += f"<tr><td>{e['xport']}</td><td>{e['iport']}</td><td>{e['iip']}</td></tr>"
+    page += "<tr><th>public port</th><th>internal port</th><th>internal ip</th>\
+             <th>internal vpn device</th>th>internal vpn server ip</th></tr>"
+    for e in naptMC.getConf():
+        c = e['conn'].getConfig()
+        page += f"<tr><td>{e['xport']}</td><td>{e['iport']}</td> \
+                  <td>{e['iip']}</td><td>{c['dev']}</td><td>{c['ip']}</td> \
+                  <td>{e['xiface']}</td></tr>"
     page += "</table>"
 
     page += "DHCP v4"
@@ -488,7 +560,8 @@ def hello_world():
     #page += "<tr><th>Peer public key</th><th>ip</th><th>created age (s)</th><th>renewed age (s)</th></tr>"
     t = time.time()
     for k, v in vpn.getClientDict().items():
-        naptm.setMap([{'xport': 80, 'iport': 80, 'iip': v['ip'].split('/')[0]}])
+        naptMC.setConf([{'xport': 80, 'iport': 80, 'iip': v['ip'].split('/')[0],
+            'conn': vpn, 'xiface': 'eth0'}])
         page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['user'], v['ip'], t-v['created'], t-v['renewed'])
         #page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['ip'], t-v['created'], t-v['renewed'])
     page += "</table>"
