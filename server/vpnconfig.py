@@ -276,8 +276,7 @@ class NAPTmanConn:
     def __init__(self):
         self.__cnf = [] #[{'xport': 80, 'iport': 80, 'iip': '10.23.42.32',
             #'conn': myVPN}]
-        self.__manXif = set({})
-        self.__manIif = set({})
+        self.__name = 'NAPTmanConn'
 
 
     def setConf(self, cnf):
@@ -295,35 +294,29 @@ class NAPTmanConn:
                      'iiface': e['conn'].getConfig()['dev'],
                      'xiface': e['xiface'] } for e in self.__cnf ]
 
-        manXif = {e['xiface'] for e in mapping}
-        manIif = {e['iiface'] for e in mapping}
-        self.__manXif.update(manXif)
-        self.__manIif.update(manIif)
-
-        postr = iptc.easy.dump_chain('nat', 'POSTROUTING', ipv6=False)
-        postd = [e for e in postr if 'out-interface' in e if e['out-interface'] in self.__manIif]
-        for e in postd:
+        por = iptc.easy.dump_chain('nat', 'POSTROUTING', ipv6=False)
+        pod = [e for e in por if 'comment' in e if e['comment'] == self.__name]
+        for e in pod:
             iptc.easy.delete_rule('nat', 'POSTROUTING', e)
-        prer = iptc.easy.dump_chain('nat', 'PREROUTING', ipv6=False)
-        pred = [e for e in prer if 'in-interface' in e if e['in-interface'] in self.__manXif]
-        for e in pred:
+        prr = iptc.easy.dump_chain('nat', 'PREROUTING', ipv6=False)
+        prd = [e for e in prr if 'comment' in e if e['comment'] == self.__name]
+        for e in prd:
             iptc.easy.delete_rule('nat', 'PREROUTING', e)
-        self.__manXif = manXif
-        self.__manIif = manIif
 
         for e in mapping:
             pre = { 'protocol': 'tcp', \
+                    'comment': self.__name, \
                     'in-interface': e['xiface'], \
                     'tcp': {'dport': f"{e['xport']}"}, \
                     'target': {'DNAT': {'to-destination': e['iip']} } }
             post = {'dst': e['iip'],
                     'protocol': 'tcp',
+                    'comment': self.__name, \
                     'out-interface': e['iiface'],
                     'tcp': {'dport': f"{e['iport']}"},
                     'target': {'SNAT': {'to-source': e['sip']} } }
             iptc.easy.insert_rule('nat', 'PREROUTING', pre)
             iptc.easy.insert_rule('nat', 'POSTROUTING', post)
-
 
     def __del__(self):
         self.setConf([])
@@ -537,7 +530,8 @@ def hello_world():
     page += "<h2>NAPT Table</h2>"
     page += "<table>"
     page += "<tr><th>public port</th><th>internal port</th><th>internal ip</th>\
-             <th>internal vpn device</th>th>internal vpn server ip</th></tr>"
+             <th>internal vpn device</th><th>internal vpn server ip</th> \
+             <th>external interface</th></tr>"
     for e in naptMC.getConf():
         c = e['conn'].getConfig()
         page += f"<tr><td>{e['xport']}</td><td>{e['iport']}</td> \
