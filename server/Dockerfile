@@ -4,9 +4,10 @@ ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get -y update && apt-get install -y wireguard iproute2 iptables python3 python3-pip
 
-RUN apt-get -y update && apt-get install -y iputils-ping curl
+RUN apt-get -y update && apt-get install -y iputils-ping curl net-tools traceroute
 
-RUN pip3 install flask flask_httpauth python-iptables
+RUN pip3 install flask flask_httpauth python-iptables pyroute2
+
 
 COPY vpnconfig.py /.
 

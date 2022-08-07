@@ -11,6 +11,7 @@ import time
 from threading import Thread
 
 import iptc
+from pyroute2 import IPRoute
 
 
 def run(cli, input=None):
@@ -176,7 +177,7 @@ class VPNManager:
     def setConfig(self, ip=None, port=None, dev=None, timeout=None):
         if ip is not None:
             self.__ip = ip
-            self.__ipRng = calcIpNet(ip)
+            self.__ipRng = '0.0.0.0/0' #calcIpNet(ip)
         if port is not None:
             self.__port = port
         if dev is not None:
@@ -217,7 +218,7 @@ class VPNManager:
         run(['ip', 'link', 'add', 'dev', self.__dev, 'type', 'wireguard'])
         run(['ip', 'address', 'add', 'dev', self.__dev, self.__ip])
         run(['wg', 'set', self.__dev, 'listen-port', str(self.__port), 'private-key',
-        '/dev/stdin'], input=self.__privkey)
+            '/dev/stdin'], input=self.__privkey)
         run(['ip', 'link', 'set', 'up', 'dev', self.__dev])
 
     def __rmLink(self):
@@ -322,8 +323,42 @@ class NAPTmanConn:
         self.setConf([])
 
 
+def gtClIp(x):
+    if type(x) is str:
+        return x
+    return x['ip']
+
+class RouteManager:
+    def __init__(self):
+        self.__routes = [] #[{'gw': 'client_or_ip', 'trgt': '192.168.42.23'}]
+        self.__routesNew = set()
+        self.__routesOld = set()
+        self.__ipr = IPRoute()
+
+    def getRoutes(self):
+        return self.__routes
+
+    def setRoutes(self, routes):
+        self.__routes = routes
+        self.commit()
+
+    def addRoutes(self, routes):
+        self.__routes.append(routes)
+        self.commit()
 
 
+    def commit(self):
+        self.__routesNew = {(gtClIp(e['gw']), e['trgt']) for e in self.__routes}
+        addRoutes = self.__routesNew - self.__routesOld
+        delRoutes = self.__routesOld - self.__routesNew
+        for e in addRoutes:
+            self.__ipr.route("add", dst=e[1], gateway=e[0])
+        for e in delRoutes:
+            self.__ipr.route("del", dst=e[1], gateway=e[0])
+        self.__routesOld = self.__routesNew.copy()
+
+    def __del__(self):
+        self.setRoutes([])
 
 
 
@@ -415,7 +450,7 @@ authuser = HTTPBasicAuth()
 dhcpv4 = DHCPv4()
 dhcpv4.addIPs(ipRng2set('10.23.42.2','10.23.42.150','10.23.42.1/24'))
 
-vpn = VPNManager(dhcpv4=dhcpv4)
+vpn = VPNManager(dhcpv4=dhcpv4, ip='10.23.42.1/24')
 vpn.enable()
 
 
@@ -423,6 +458,7 @@ pm = PeerManager()
 
 um = UserManager()
 
+rm = RouteManager()
 
 vpnconf = vpn.getConfig()
 
@@ -539,6 +575,15 @@ def hello_world():
                   <td>{e['xiface']}</td></tr>"
     page += "</table>"
 
+    page += "<h2>Routes</h2>"
+    page += "<table>"
+    page += "<tr><th>Gateway</th><th>Target</th></tr>"
+    for e in rm.getRoutes():
+        page += f"<tr><td>{gtClIp(e['gw'])}</td><td>{e['trgt']}</td></tr>"
+
+    page += "</table>"
+
+
     page += "DHCP v4"
     page += "<table>"
     page += "<tr><th>ip</th><th>age</th></tr>"
@@ -556,6 +601,7 @@ def hello_world():
     for k, v in vpn.getClientDict().items():
         naptMC.setConf([{'xport': 80, 'iport': 80, 'iip': v['ip'].split('/')[0],
             'conn': vpn, 'xiface': 'eth0'}])
+        rm.setRoutes([{'gw': v, 'trgt': '192.168.23.0/24'}])
         page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['user'], v['ip'], t-v['created'], t-v['renewed'])
         #page += "<tr><td>{}</td><td>{}</td><td>{}</td><td align=right>{:9.1f}</td><td align=right>{:9.1f}</td></tr>".format(k, v['ip'], t-v['created'], t-v['renewed'])
     page += "</table>"

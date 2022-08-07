@@ -9,6 +9,8 @@ services:
     environment:
       - WGADR=10.23.42.1/24
       - WGADRRNG=10.23.42.0/24
+    networks:
+      - frontend
 
   vpnclient:
     build: client
@@ -19,6 +21,24 @@ services:
       - WGADR=10.23.42.2/24
       - WGADRRNG=10.23.42.0/24
       - ENDPOINT=vpnserver:51820
+    networks:
+      - frontend
+      - backend
 
+
+  node1:
+    build: node
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    networks:
+      - backend
+
+
+networks:
+  frontend:
+    driver: bridge 
+  backend:
+    driver: bridge 
 
 

@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get -y update && apt-get install -y wireguard iproute2 python3 python3-pip
 
-RUN apt-get -y update && apt-get install -y iputils-ping curl jq
+RUN apt-get -y update && apt-get install -y iputils-ping curl jq net-tools traceroute
 
 
 COPY entrypoint.sh /.
